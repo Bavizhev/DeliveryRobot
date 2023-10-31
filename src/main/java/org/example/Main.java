@@ -12,10 +12,13 @@ public class Main {
 
     public static void main(String[] args) {
 
+        Thread leaderThread = new Thread(new LeaderPrinter()); // Создаем отдельный поток для вывода на экран лидера в мапу sizeToFreq
+        leaderThread.start();
+
         // Создание и запуск потоков
         Thread[] threads = new Thread[numThreads];
         for (int i = 0; i < numThreads; i++) {
-            threads[i] = new Thread(new RouteAnalyzerTask());
+            threads[i] = new Thread(new RouteAnalyzerTask(leaderThread));
             threads[i].start();
         }
 
@@ -28,31 +31,20 @@ public class Main {
             e.printStackTrace();
         }
 
-        // Анализируем результаты
-        int mostFrequentSize = 0;
-        int mostFrequentCount = 0;
-        for (Map.Entry<Integer, Integer> entry : sizeToFreq.entrySet()) {
-            int size = entry.getKey();
-            int count = entry.getValue();
-            if (count > mostFrequentCount) {
-                mostFrequentSize = size;
-                mostFrequentCount = count;
-            }
-        }
+        // Прерываем поток печати лидера
+        leaderThread.interrupt();
 
-        // Выводим результаты
-        System.out.println("Самое частое количество повторений " + mostFrequentSize + " (встретилось " + mostFrequentCount + " раз)");
-        System.out.println("Другие размеры:");
-        for (Map.Entry<Integer, Integer> entry : sizeToFreq.entrySet()) {
-            if (entry.getKey() != mostFrequentSize) {
-                System.out.println("- " + entry.getKey() + " (" + entry.getValue() + " раз)");
-            }
-        }
     }
 
     static class RouteAnalyzerTask implements Runnable {
+        private Thread leaderThread;
+
+        public RouteAnalyzerTask(Thread leaderThread) {
+            this.leaderThread = leaderThread;
+        }
         @Override
         public void run() {
+
             String route = generateRoute(instructions, routeLength);
             int rightTurnCount = countRightTurns(route);
 
@@ -60,6 +52,8 @@ public class Main {
             synchronized (sizeToFreq) {
                 int currentCount = sizeToFreq.getOrDefault(rightTurnCount, 0);
                 sizeToFreq.put(rightTurnCount, currentCount + 1); // увеличим значение для получения частоты в ней на 1
+
+                sizeToFreq.notify();// Отправляем сигнал печатающему максимумы потоку
             }
         }
 
@@ -74,6 +68,37 @@ public class Main {
 
         public int countRightTurns(String route) {
             return route.length() - route.replace("R", "").length();
+        }
+    }
+    static class LeaderPrinter implements Runnable {
+        @Override
+        public void run() {
+            while (!Thread.interrupted()) {
+                synchronized (sizeToFreq) {
+                    try {
+                        // Ждем сигнала от других потоков
+                        sizeToFreq.wait();
+                    } catch (InterruptedException e) {
+                        // Поток прерван, выходим из цикла
+                        break;
+                    }
+
+                    // Находим лидера
+                    int mostFrequentSize = 0;
+                    int mostFrequentCount = 0;
+                    for (Map.Entry<Integer, Integer> entry : sizeToFreq.entrySet()) {
+                        int size = entry.getKey();
+                        int count = entry.getValue();
+                        if (count > mostFrequentCount) {
+                            mostFrequentSize = size;
+                            mostFrequentCount = count;
+                        }
+                    }
+
+                    // Выводим лидера
+                    System.out.println("Текущий лидер: " + mostFrequentSize + " (встретился " + mostFrequentCount + " раз)");
+                }
+            }
         }
     }
 }
